@@ -8,54 +8,66 @@ RESET="\e[0m"
 
 clear
 echo -e "${CYAN}==========================================${RESET}"
-echo -e "${GREEN} 🚀 Auto Installer Cloudflare Tunnel (Multi Domain) ${RESET}"
+echo -e "${GREEN} 🚀 Auto Config Cloudflare Tunnel (Multi Domain) ${RESET}"
 echo -e "${CYAN}==========================================${RESET}"
 
-# 1. Install cloudflared
-echo -e "${YELLOW}🔧 Menginstall cloudflared...${RESET}"
-apt update -y
-apt install -y wget screen
+# Pastikan cloudflared sudah ada
+if ! command -v cloudflared &> /dev/null; then
+    echo -e "${YELLOW}❌ cloudflared belum terinstall!"
+    echo -e "➡ Silakan install manual dulu sesuai arsitektur VPS.${RESET}"
+    exit 1
+fi
 
-wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-dpkg -i cloudflared-linux-amd64.deb || apt -f install -y
-
-# 2. Login Cloudflare
+# Login Cloudflare
 echo -e "${YELLOW}🌐 Login Cloudflare... (ikuti link yang muncul)${RESET}"
 cloudflared tunnel login
 
-# 3. Buat tunnel
+# Buat tunnel
 read -p "👉 Masukkan nama tunnel: " TUNNEL_NAME
 cloudflared tunnel create $TUNNEL_NAME
 
 CONFIG_DIR="/etc/cloudflared"
 mkdir -p $CONFIG_DIR
 
-# 4. Input domain mapping
+# Input domain mapping
 read -p "👉 Berapa banyak subdomain yang mau ditambahkan? " TOTAL
 
-INGRESS_RULES=""
-for ((i=1; i<=TOTAL; i++))
-do
+# Simpan input dulu
+declare -a DOMAINS
+declare -a PORTS
+
+for ((i=1; i<=TOTAL; i++)); do
     read -p "🌐 Subdomain #$i (contoh: api.domain.com): " DOMAIN
     read -p "🔌 Port untuk $DOMAIN (contoh: 3000): " PORT
-    INGRESS_RULES+="  - hostname: $DOMAIN\n    service: http://localhost:$PORT\n"
+    DOMAINS[$i]=$DOMAIN
+    PORTS[$i]=$PORT
 done
 
-# Tambahkan fallback rule
-INGRESS_RULES+="  - service: http_status:404"
-
-# 5. Generate config.yml
+# --- Generate config.yml dengan indentasi benar ---
 cat > $CONFIG_DIR/config.yml <<EOF
 tunnel: $TUNNEL_NAME
 credentials-file: /root/.cloudflared/${TUNNEL_NAME}.json
 
 ingress:
-$INGRESS_RULES
+EOF
+
+for ((i=1; i<=TOTAL; i++)); do
+    DOMAIN=${DOMAINS[$i]}
+    PORT=${PORTS[$i]}
+    cat >> $CONFIG_DIR/config.yml <<EOL
+  - hostname: $DOMAIN
+    service: http://localhost:$PORT
+EOL
+done
+
+# fallback 404
+cat >> $CONFIG_DIR/config.yml <<EOF
+  - service: http_status:404
 EOF
 
 echo -e "${GREEN}✔ Config multi-domain dibuat di $CONFIG_DIR/config.yml${RESET}"
 
-# 6. Run tunnel pakai screen
+# Run tunnel pakai screen
 echo -e "${YELLOW}▶ Menjalankan tunnel di screen (session: cf-tunnel)...${RESET}"
 screen -dmS cf-tunnel cloudflared tunnel run $TUNNEL_NAME
 
