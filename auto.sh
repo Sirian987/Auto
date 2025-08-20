@@ -1,80 +1,66 @@
 #!/bin/bash
+set -e
 
-# Warna
 GREEN="\e[32m"
-RED="\e[31m"
-CYAN="\e[36m"
 YELLOW="\e[33m"
+CYAN="\e[36m"
 RESET="\e[0m"
 
 clear
-echo -e "${CYAN}"
-echo "=========================================="
-echo "   🚀 Auto Subdomain + Nginx + SSL Tool   "
-echo "=========================================="
-echo -e "${RESET}"
+echo -e "${CYAN}==========================================${RESET}"
+echo -e "${GREEN} 🚀 Auto Installer Cloudflare Tunnel (Multi Domain) ${RESET}"
+echo -e "${CYAN}==========================================${RESET}"
 
-# --- INPUT ---
-echo -e "${YELLOW}Masukkan data subdomain:${RESET}"
-read -p "👉 Domain utama (contoh: contoh.com) : " domain
-read -p "👉 Subdomain (contoh: app)           : " sub
-read -p "👉 Port aplikasi (contoh: 3000)      : " port
+# 1. Install cloudflared
+echo -e "${YELLOW}🔧 Menginstall cloudflared...${RESET}"
+apt update -y
+apt install -y wget screen
 
-echo ""
-read -p "Gunakan IP otomatis VPS? (y/n): " use_auto_ip
+wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+dpkg -i cloudflared-linux-amd64.deb || apt -f install -y
 
-if [ "$use_auto_ip" == "y" ]; then
-    IP_SERVER=$(curl -s ifconfig.me)
-    echo -e "${GREEN}✔ IP Otomatis terdeteksi: $IP_SERVER${RESET}"
-else
-    read -p "👉 Masukkan IP manual: " IP_SERVER
-fi
+# 2. Login Cloudflare
+echo -e "${YELLOW}🌐 Login Cloudflare... (ikuti link yang muncul)${RESET}"
+cloudflared tunnel login
 
-# --- CLOUDFLARE ---
-CF_API="https://api.cloudflare.com/client/v4"
-CF_ZONE_ID="a0d0c8634bd44d04e3efd8d997120d78"        # isi dengan Zone ID
-CF_API_TOKEN="k7JBLVmRBFYaOiNcZhloiJJOuDgehotB9kLWJ_JB"    # isi dengan API Token
+# 3. Buat tunnel
+read -p "👉 Masukkan nama tunnel: " TUNNEL_NAME
+cloudflared tunnel create $TUNNEL_NAME
 
-echo ""
-echo -e "${CYAN}⚡ Menambahkan DNS record ke Cloudflare...${RESET}"
-curl -s -X POST "$CF_API/zones/$CF_ZONE_ID/dns_records" \
-     -H "Authorization: Bearer $CF_API_TOKEN" \
-     -H "Content-Type: application/json" \
-     --data "{\"type\":\"A\",\"name\":\"$sub.$domain\",\"content\":\"$IP_SERVER\",\"ttl\":120,\"proxied\":false}" \
-     | jq
+CONFIG_DIR="/etc/cloudflared"
+mkdir -p $CONFIG_DIR
 
-# --- NGINX CONFIG ---
-servername="$sub.$domain"
-conf_path="/etc/nginx/sites-available/$servername"
+# 4. Input domain mapping
+read -p "👉 Berapa banyak subdomain yang mau ditambahkan? " TOTAL
 
-cat > $conf_path <<EOF
-server {
-    listen 80;
-    server_name $servername;
+INGRESS_RULES=""
+for ((i=1; i<=TOTAL; i++))
+do
+    read -p "🌐 Subdomain #$i (contoh: api.domain.com): " DOMAIN
+    read -p "🔌 Port untuk $DOMAIN (contoh: 3000): " PORT
+    INGRESS_RULES+="  - hostname: $DOMAIN\n    service: http://localhost:$PORT\n"
+done
 
-    location / {
-        proxy_pass http://127.0.0.1:$port;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
-    }
-}
+# Tambahkan fallback rule
+INGRESS_RULES+="  - service: http_status:404"
+
+# 5. Generate config.yml
+cat > $CONFIG_DIR/config.yml <<EOF
+tunnel: $TUNNEL_NAME
+credentials-file: /root/.cloudflared/${TUNNEL_NAME}.json
+
+ingress:
+$INGRESS_RULES
 EOF
 
-ln -s $conf_path /etc/nginx/sites-enabled/ 2>/dev/null
+echo -e "${GREEN}✔ Config multi-domain dibuat di $CONFIG_DIR/config.yml${RESET}"
 
-nginx -t && systemctl reload nginx
+# 6. Run tunnel pakai screen
+echo -e "${YELLOW}▶ Menjalankan tunnel di screen (session: cf-tunnel)...${RESET}"
+screen -dmS cf-tunnel cloudflared tunnel run $TUNNEL_NAME
 
-# --- SSL ---
-echo ""
-echo -e "${CYAN}🔒 Mengaktifkan SSL (Let's Encrypt)...${RESET}"
-certbot --nginx -d $servername
-
-echo ""
 echo -e "${GREEN}=========================================="
-echo "  🎉 Selesai!"
-echo "  🌍 Domain : https://$servername"
-echo "  🚀 Proxy  : 127.0.0.1:$port"
-echo "==========================================${RESET}"
+echo "✅ Cloudflare Tunnel '$TUNNEL_NAME' aktif!"
+echo "📂 Config : $CONFIG_DIR/config.yml"
+echo "🖥 Screen : cf-tunnel  (lihat dengan 'screen -r cf-tunnel')"
+echo -e "==========================================${RESET}"
