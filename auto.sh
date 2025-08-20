@@ -32,8 +32,8 @@ fi
 
 # --- CLOUDFLARE ---
 CF_API="https://api.cloudflare.com/client/v4"
-CF_ZONE_ID="ZONE_ID_KAMU"        # isi dengan Zone ID
-CF_API_TOKEN="API_TOKEN_KAMU"    # isi dengan API Token
+CF_ZONE_ID="a0d0c8634bd44d04e3efd8d997120d78"        # isi dengan Zone ID
+CF_API_TOKEN="k7JBLVmRBFYaOiNcZhloiJJOuDgehotB9kLWJ_JB"    # isi dengan API Token
 
 echo ""
 echo -e "${CYAN}⚡ Menambahkan DNS record ke Cloudflare...${RESET}"
